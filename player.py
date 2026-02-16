@@ -1,31 +1,33 @@
 from PySide6.QtCore import Qt, QUrl, QThread, Signal, QObject
 from PySide6.QtWidgets import (
     QWidget, QPushButton, QSlider, QLabel,
-    QHBoxLayout, QVBoxLayout, QFileDialog, QStyle, QInputDialog, QMessageBox, QProgressDialog, QCheckBox
+    QHBoxLayout, QVBoxLayout, QFileDialog, QStyle, QInputDialog, QMessageBox, QProgressDialog, QCheckBox, QListWidget, QMenu, QAbstractItemView
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtGui import QGuiApplication
 import os
 import logging
+import random
 
 
 class VideoPlayer(QWidget):
     """Reproductor de vídeo simple usando PySide6.
 
-    Controles:
-    - Abrir archivo
-    - Play / Pause
-    - Stop
-    - Barra de progreso (seek)
-    - Volumen
-    - Etiqueta de tiempo (tiempo actual / duración)
+    Controles adicionales: cola de reproducción, anterior/siguiente, pantalla completa,
+    bucle (loop) y aleatorio (shuffle).
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("PyVideoPlayer")
-        self.resize(800, 600)
+        self.resize(900, 640)
+
+        # Estado de la cola/reproducción
+        self.playlist = []  # list[str]
+        self.current_index = -1
+        self.loop = False
+        self.shuffle = False
 
         # Guardar ruta del archivo actual
         self.current_file = None
@@ -39,19 +41,51 @@ class VideoPlayer(QWidget):
         self.video_widget = QVideoWidget()
         self.player.setVideoOutput(self.video_widget)
 
-        # Botones
+        # Botones principales
         self.open_btn = QPushButton("Abrir")
         self.open_btn.clicked.connect(self.open_file)
+
+        self.add_queue_btn = QPushButton("Añadir a cola")
+        self.add_queue_btn.clicked.connect(self.add_to_queue_dialog)
+
+        self.import_btn = QPushButton("Importar cola")
+        self.import_btn.clicked.connect(self.import_playlist_dialog)
+
+        self.export_btn = QPushButton("Exportar cola")
+        self.export_btn.clicked.connect(self.export_playlist_dialog)
+
+        self.add_folder_btn = QPushButton("Añadir carpeta")
+        self.add_folder_btn.clicked.connect(self.add_folder_dialog)
+
+        self.remove_btn = QPushButton("Eliminar seleccionado")
+        self.remove_btn.clicked.connect(self.remove_selected)
+
+        self.clear_btn = QPushButton("Limpiar cola")
+        self.clear_btn.clicked.connect(self.clear_playlist)
+
+        self.prev_btn = QPushButton()
+        self.prev_btn.setEnabled(False)
+        self.prev_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
+        self.prev_btn.clicked.connect(self.prev_track)
 
         self.play_btn = QPushButton()
         self.play_btn.setEnabled(False)
         self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.play_btn.clicked.connect(self.toggle_play)
 
+        self.next_btn = QPushButton()
+        self.next_btn.setEnabled(False)
+        self.next_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipForward))
+        self.next_btn.clicked.connect(self.next_track)
+
         self.stop_btn = QPushButton()
         self.stop_btn.setEnabled(False)
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
         self.stop_btn.clicked.connect(self.stop)
+
+        self.fullscreen_btn = QPushButton("Pantalla completa")
+        self.fullscreen_btn.setCheckable(True)
+        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
 
         # Nuevo: botón para cortar en segmentos
         self.split_btn = QPushButton("Cortar")
@@ -63,6 +97,15 @@ class VideoPlayer(QWidget):
         self.chk_force_precise.setToolTip("Recodifica cada segmento para cortes exactos (más lento)")
         self.chk_debug_logs = QCheckBox("Activar logs DEBUG")
         self.chk_debug_logs.setToolTip("Activa logs DEBUG para ver start_ms/end_ms durante el corte")
+
+        # Checkbox para loop y shuffle
+        self.chk_loop = QCheckBox("Bucle")
+        self.chk_loop.setToolTip("Si está activado, la cola se reproducirá en bucle")
+        self.chk_loop.stateChanged.connect(lambda s: setattr(self, 'loop', bool(s)))
+
+        self.chk_shuffle = QCheckBox("Aleatorio")
+        self.chk_shuffle.setToolTip("Si está activado, se reproducirán pistas aleatorias de la cola")
+        self.chk_shuffle.stateChanged.connect(lambda s: setattr(self, 'shuffle', bool(s)))
 
         # Slider de progreso
         self.position_slider = QSlider(Qt.Horizontal)
@@ -79,14 +122,37 @@ class VideoPlayer(QWidget):
         # Etiqueta de tiempo
         self.time_label = QLabel("00:00 / 00:00")
 
+        # Lista de reproducción
+        self.playlist_widget = QListWidget()
+        self.playlist_widget.setSelectionMode(QListWidget.SingleSelection)
+        self.playlist_widget.setDragDropMode(QAbstractItemView.InternalMove)
+        # Conectar reordenado para sincronizar la lista interna
+        try:
+            self.playlist_widget.model().rowsMoved.connect(self.on_playlist_reordered)
+        except Exception:
+            pass
+        self.playlist_widget.itemDoubleClicked.connect(self.on_playlist_double_click)
+        self.playlist_widget.setMinimumWidth(240)
+
         # Layouts
         control_layout = QHBoxLayout()
         control_layout.addWidget(self.open_btn)
+        control_layout.addWidget(self.add_queue_btn)
+        control_layout.addWidget(self.import_btn)
+        control_layout.addWidget(self.export_btn)
+        control_layout.addWidget(self.add_folder_btn)
+        control_layout.addWidget(self.remove_btn)
+        control_layout.addWidget(self.clear_btn)
+        control_layout.addWidget(self.prev_btn)
         control_layout.addWidget(self.play_btn)
         control_layout.addWidget(self.stop_btn)
+        control_layout.addWidget(self.next_btn)
+        control_layout.addWidget(self.fullscreen_btn)
         control_layout.addWidget(self.split_btn)
         control_layout.addWidget(self.chk_force_precise)
         control_layout.addWidget(self.chk_debug_logs)
+        control_layout.addWidget(self.chk_loop)
+        control_layout.addWidget(self.chk_shuffle)
         control_layout.addWidget(QLabel("Vol:"))
         control_layout.addWidget(self.volume_slider)
 
