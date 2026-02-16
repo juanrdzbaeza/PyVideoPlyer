@@ -41,50 +41,70 @@ class VideoPlayer(QWidget):
         self.video_widget = QVideoWidget()
         self.player.setVideoOutput(self.video_widget)
 
-        # Botones principales
-        self.open_btn = QPushButton("Abrir")
+        # Botones principales (iconos + tooltips para una UI más compacta)
+        self.open_btn = QPushButton()
+        self.open_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.open_btn.setToolTip('Abrir archivo')
         self.open_btn.clicked.connect(self.open_file)
 
-        self.add_queue_btn = QPushButton("Añadir a cola")
+        self.add_queue_btn = QPushButton()
+        self.add_queue_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogNewFolder))
+        self.add_queue_btn.setToolTip('Añadir archivos a la cola')
         self.add_queue_btn.clicked.connect(self.add_to_queue_dialog)
 
-        self.import_btn = QPushButton("Importar cola")
+        self.import_btn = QPushButton()
+        self.import_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.import_btn.setToolTip('Importar cola (JSON)')
         self.import_btn.clicked.connect(self.import_playlist_dialog)
 
-        self.export_btn = QPushButton("Exportar cola")
+        self.export_btn = QPushButton()
+        self.export_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        self.export_btn.setToolTip('Exportar cola (JSON)')
         self.export_btn.clicked.connect(self.export_playlist_dialog)
 
-        self.add_folder_btn = QPushButton("Añadir carpeta")
+        self.add_folder_btn = QPushButton()
+        self.add_folder_btn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
+        self.add_folder_btn.setToolTip('Añadir carpeta entera a la cola')
         self.add_folder_btn.clicked.connect(self.add_folder_dialog)
 
-        self.remove_btn = QPushButton("Eliminar seleccionado")
+        self.remove_btn = QPushButton()
+        self.remove_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        self.remove_btn.setToolTip('Eliminar seleccionado')
         self.remove_btn.clicked.connect(self.remove_selected)
 
-        self.clear_btn = QPushButton("Limpiar cola")
+        self.clear_btn = QPushButton()
+        self.clear_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.clear_btn.setToolTip('Limpiar cola')
         self.clear_btn.clicked.connect(self.clear_playlist)
 
         self.prev_btn = QPushButton()
         self.prev_btn.setEnabled(False)
         self.prev_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
+        self.prev_btn.setToolTip('Anterior')
         self.prev_btn.clicked.connect(self.prev_track)
 
         self.play_btn = QPushButton()
         self.play_btn.setEnabled(False)
         self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.play_btn.setToolTip('Play / Pause (Space)')
         self.play_btn.clicked.connect(self.toggle_play)
 
         self.next_btn = QPushButton()
         self.next_btn.setEnabled(False)
         self.next_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipForward))
+        self.next_btn.setToolTip('Siguiente')
         self.next_btn.clicked.connect(self.next_track)
 
         self.stop_btn = QPushButton()
         self.stop_btn.setEnabled(False)
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+        self.stop_btn.setToolTip('Stop')
         self.stop_btn.clicked.connect(self.stop)
 
-        self.fullscreen_btn = QPushButton("Pantalla completa")
+        self.fullscreen_btn = QPushButton()
         self.fullscreen_btn.setCheckable(True)
+        self.fullscreen_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+        self.fullscreen_btn.setToolTip('Pantalla completa (F / Esc para salir)')
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
 
         # Nuevo: botón para cortar en segmentos
@@ -309,6 +329,13 @@ class VideoPlayer(QWidget):
             self.toggle_fullscreen(self.fullscreen_btn.isChecked())
             event.accept()
             return
+        # Esc: salir de fullscreen si está activo
+        if key == Qt.Key_Escape:
+            if self.fullscreen_btn.isChecked():
+                self.fullscreen_btn.setChecked(False)
+                self.toggle_fullscreen(False)
+                event.accept()
+                return
         # Delete: remove selected
         if key == Qt.Key_Delete:
             self.remove_selected()
@@ -481,6 +508,11 @@ class VideoPlayer(QWidget):
     def toggle_fullscreen(self, checked: bool):
         try:
             self.video_widget.setFullScreen(bool(checked))
+            # Sincronizar estado del botón y la vista
+            if checked:
+                self.fullscreen_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarNormalButton))
+            else:
+                self.fullscreen_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
         except Exception:
             pass
 
