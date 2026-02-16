@@ -781,3 +781,16 @@ class VideoPlayer(QWidget):
                 self.current_index = -1
         # Guardar settings tras reordenado
         self.save_settings()
+
+    def _probe_duration_safe(self, path: str):
+        """Intentar obtener la duración del fichero usando splitter/ffprobe; devolver None si no es posible."""
+        try:
+            import splitter
+            ff = splitter._find_ffmpeg_executable()
+            if not ff:
+                return None
+            dur = splitter._probe_duration_with_ffprobe(ff, path)
+            return dur
+        except Exception:
+            return None
+
