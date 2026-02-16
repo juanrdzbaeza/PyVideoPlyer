@@ -112,20 +112,56 @@ class VideoPlayer(QWidget):
         self.split_btn.setEnabled(False)
         self.split_btn.clicked.connect(self.request_split)
 
-        # Checkboxes para opciones de corte y logs
-        self.chk_force_precise = QCheckBox("Forzar cortes precisos")
-        self.chk_force_precise.setToolTip("Recodifica cada segmento para cortes exactos (más lento)")
-        self.chk_debug_logs = QCheckBox("Activar logs DEBUG")
-        self.chk_debug_logs.setToolTip("Activa logs DEBUG para ver start_ms/end_ms durante el corte")
+        # Opciones como botones toggle (compactos con iconos)
+        # Forzar cortes precisos
+        self.btn_force_precise = QPushButton()
+        self.btn_force_precise.setCheckable(True)
+        try:
+            self.btn_force_precise.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        except Exception:
+            pass
+        self.btn_force_precise.setToolTip('Forzar cortes precisos: recodifica cada segmento para cortes exactos (más lento)')
 
-        # Checkbox para loop y shuffle
-        self.chk_loop = QCheckBox("Bucle")
-        self.chk_loop.setToolTip("Si está activado, la cola se reproducirá en bucle")
-        self.chk_loop.stateChanged.connect(lambda s: setattr(self, 'loop', bool(s)))
+        # Activar logs DEBUG
+        self.btn_debug_logs = QPushButton()
+        self.btn_debug_logs.setCheckable(True)
+        try:
+            self.btn_debug_logs.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation))
+        except Exception:
+            pass
+        self.btn_debug_logs.setToolTip('Activar logs DEBUG: muestra start_ms/end_ms y si se usó copy o recode')
 
-        self.chk_shuffle = QCheckBox("Aleatorio")
-        self.chk_shuffle.setToolTip("Si está activado, se reproducirán pistas aleatorias de la cola")
-        self.chk_shuffle.stateChanged.connect(lambda s: setattr(self, 'shuffle', bool(s)))
+        # Bucle (loop)
+        self.btn_loop = QPushButton()
+        self.btn_loop.setCheckable(True)
+        try:
+            self.btn_loop.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        except Exception:
+            pass
+        self.btn_loop.setToolTip('Bucle')
+        self.btn_loop.toggled.connect(lambda s: (setattr(self, 'loop', bool(s)), self.save_settings()))
+
+        # Aleatorio (shuffle)
+        self.btn_shuffle = QPushButton()
+        self.btn_shuffle.setCheckable(True)
+        # Intentar icono de tema (media-playlist-shuffle), luego asset local, luego estándar
+        try:
+            from PySide6.QtGui import QIcon
+            icon = QIcon.fromTheme('media-playlist-shuffle')
+            if icon is None or icon.isNull():
+                asset_path = os.path.join(os.path.dirname(__file__), 'assets', 'shuffle.svg')
+                if os.path.exists(asset_path):
+                    icon = QIcon(asset_path)
+            if icon is None or icon.isNull():
+                icon = self.style().standardIcon(QStyle.SP_BrowserStop)
+            self.btn_shuffle.setIcon(icon)
+        except Exception:
+            try:
+                self.btn_shuffle.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+            except Exception:
+                pass
+        self.btn_shuffle.setToolTip('Aleatorio')
+        self.btn_shuffle.toggled.connect(lambda s: (setattr(self, 'shuffle', bool(s)), self.save_settings()))
 
         # Slider de progreso
         self.position_slider = QSlider(Qt.Horizontal)
@@ -169,32 +205,59 @@ class VideoPlayer(QWidget):
         control_layout.addWidget(self.next_btn)
         control_layout.addWidget(self.fullscreen_btn)
         control_layout.addWidget(self.split_btn)
-        control_layout.addWidget(self.chk_force_precise)
-        control_layout.addWidget(self.chk_debug_logs)
-        control_layout.addWidget(self.chk_loop)
-        control_layout.addWidget(self.chk_shuffle)
+        # botones compactos para opciones
+        control_layout.addWidget(self.btn_force_precise)
+        control_layout.addWidget(self.btn_debug_logs)
+        control_layout.addWidget(self.btn_loop)
+        control_layout.addWidget(self.btn_shuffle)
         control_layout.addWidget(QLabel("Vol:"))
         control_layout.addWidget(self.volume_slider)
 
-        # Explicación visible para los checkboxes (breve)
-        self.chk_help_label = QLabel()
-        self.chk_help_label.setText(
-            "Forzar cortes precisos: recodifica cada parte para cortes exactos (más lento).\n"
-            "Activar logs DEBUG: muestra start_ms/end_ms y si se usó copy o recode en la salida."
-        )
-        self.chk_help_label.setWordWrap(True)
-        self.chk_help_label.setStyleSheet('color: #444444; font-size: 11px;')
+        # Botón de ayuda compacto (abre cuadro informativo)
+        self.info_btn = QPushButton()
+        self.info_btn.setToolTip('Ayuda rápida')
+        try:
+            self.info_btn.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxQuestion))
+        except Exception:
+            pass
+        def _show_quick_help():
+            QMessageBox.information(self, 'Ayuda',
+                'Forzar cortes precisos: recodifica cada parte para cortes exactos (más lento).\n'
+                'Activar logs DEBUG: muestra start_ms/end_ms y si se usó copy o recode en la salida.\n'
+                'Bucle: reproduce la cola en bucle. Aleatorio: reproduce en orden aleatorio.')
+        self.info_btn.clicked.connect(_show_quick_help)
 
+        # Etiqueta de ayuda compacta (muy breve)
+        self.small_help_label = QLabel("Pulsa '?' para ayuda")
+        self.small_help_label.setStyleSheet('color: #666666; font-size: 11px;')
+        self.small_help_label.setToolTip('Forzar cortes precisos: recodifica cada parte para cortes exactos (más lento).\n'
+                                        'Activar logs DEBUG: muestra start_ms/end_ms y si se usó copy o recode en la salida.')
+
+        # Barra de tiempo (layout horizontal: slider expande, label a la derecha)
         bottom_layout = QHBoxLayout()
-        bottom_layout.addWidget(self.position_slider)
+        bottom_layout.addWidget(self.position_slider, 1)
         bottom_layout.addWidget(self.time_label)
 
+        # Forzar que el video ocupe el espacio disponible
+        self.video_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Ajuste de la lista de reproducción para no ser demasiado ancha
+        try:
+            self.playlist_widget.setMaximumWidth(360)
+            self.playlist_widget.setMinimumWidth(200)
+        except Exception:
+            pass
+
+        # Componer layout: a la izquierda columna vertical con video(expand) -> tiempo -> controles (pegados abajo)
         main_layout = QHBoxLayout()
         left_layout = QVBoxLayout()
-        left_layout.addWidget(self.video_widget)
+        # Video con stretch para ocupar todo el espacio disponible
+        left_layout.addWidget(self.video_widget, 1)
+        # Barra de tiempo encima de la botonera
         left_layout.addLayout(bottom_layout)
+        # Botonera en la parte inferior
         left_layout.addLayout(control_layout)
-        left_layout.addWidget(self.chk_help_label)
+        # Etiqueta de ayuda compacta debajo de la botonera (opcional, no ocupa mucho)
+        left_layout.addWidget(self.small_help_label)
 
         main_layout.addLayout(left_layout)
         main_layout.addWidget(self.playlist_widget)
@@ -263,7 +326,9 @@ class VideoPlayer(QWidget):
             import json
             s = {'last_dir': getattr(self, 'last_dir', os.path.expanduser('~')),
                  'loop': bool(self.loop),
-                 'shuffle': bool(self.shuffle)}
+                 'shuffle': bool(self.shuffle),
+                 'force_precise': bool(getattr(self, 'btn_force_precise', False) and getattr(self, 'btn_force_precise').isChecked()),
+                 'debug_logs': bool(getattr(self, 'btn_debug_logs', False) and getattr(self, 'btn_debug_logs').isChecked())}
             with open(self._settings_path, 'w', encoding='utf-8') as f:
                 json.dump(s, f, ensure_ascii=False, indent=2)
         except Exception:
@@ -280,8 +345,20 @@ class VideoPlayer(QWidget):
                 self.last_dir = s.get('last_dir', os.path.expanduser('~'))
                 self.loop = bool(s.get('loop', False))
                 self.shuffle = bool(s.get('shuffle', False))
-                self.chk_loop.setChecked(self.loop)
-                self.chk_shuffle.setChecked(self.shuffle)
+                self.btn_loop.setChecked(self.loop)
+                self.btn_shuffle.setChecked(self.shuffle)
+                # restaurar botones compactos si existen en settings
+                try:
+                    if 'force_precise' in s and hasattr(self, 'btn_force_precise'):
+                        self.btn_force_precise.setChecked(bool(s.get('force_precise', False)))
+                    if 'debug_logs' in s and hasattr(self, 'btn_debug_logs'):
+                        self.btn_debug_logs.setChecked(bool(s.get('debug_logs', False)))
+                    if hasattr(self, 'btn_loop'):
+                        self.btn_loop.setChecked(self.loop)
+                    if hasattr(self, 'btn_shuffle'):
+                        self.btn_shuffle.setChecked(self.shuffle)
+                except Exception:
+                    pass
             else:
                 self.last_dir = os.path.expanduser('~')
         except Exception:
@@ -651,14 +728,14 @@ class VideoPlayer(QWidget):
         # Aplicar opciones seleccionadas: forzar recodificación precisa y activar logs
         try:
             # Forzar cortes precisos mediante variable de entorno que lee splitter
-            if self.chk_force_precise.isChecked():
+            if self.btn_force_precise.isChecked():
                 os.environ['PYVID_SPLIT_FORCE_PRECISE'] = '1'
             else:
                 if 'PYVID_SPLIT_FORCE_PRECISE' in os.environ:
                     del os.environ['PYVID_SPLIT_FORCE_PRECISE']
 
             # Activar logging DEBUG si el checkbox está marcado
-            if self.chk_debug_logs.isChecked():
+            if self.btn_debug_logs.isChecked():
                 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
                 try:
                     import splitter as _spl
