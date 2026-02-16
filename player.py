@@ -191,6 +191,13 @@ class VideoPlayer(QWidget):
         self.playlist_widget.setMinimumWidth(240)
 
         # Layouts
+        # Botón para mostrar/ocultar lista de reproducción (compacto)
+        self.toggle_playlist_btn = QPushButton('▾')
+        self.toggle_playlist_btn.setCheckable(True)
+        self.toggle_playlist_btn.setChecked(True)
+        self.toggle_playlist_btn.setToolTip('Mostrar / Ocultar lista de reproducción')
+        self.toggle_playlist_btn.toggled.connect(lambda s: self.set_playlist_visible(bool(s)))
+
         control_layout = QHBoxLayout()
         control_layout.addWidget(self.open_btn)
         control_layout.addWidget(self.add_queue_btn)
@@ -210,6 +217,8 @@ class VideoPlayer(QWidget):
         control_layout.addWidget(self.btn_debug_logs)
         control_layout.addWidget(self.btn_loop)
         control_layout.addWidget(self.btn_shuffle)
+        # Añadir el botón toggle de playlist al final de la botonera (compacto)
+        control_layout.addWidget(self.toggle_playlist_btn)
         control_layout.addWidget(QLabel("Vol:"))
         control_layout.addWidget(self.volume_slider)
 
@@ -259,7 +268,7 @@ class VideoPlayer(QWidget):
         # Etiqueta de ayuda compacta debajo de la botonera (opcional, no ocupa mucho)
         left_layout.addWidget(self.small_help_label)
 
-        main_layout.addLayout(left_layout)
+        main_layout.addLayout(left_layout, 1)
         main_layout.addWidget(self.playlist_widget)
 
         self.setLayout(main_layout)
@@ -343,7 +352,8 @@ class VideoPlayer(QWidget):
                  'loop': bool(self.loop),
                  'shuffle': bool(self.shuffle),
                  'force_precise': bool(getattr(self, 'btn_force_precise', False) and getattr(self, 'btn_force_precise').isChecked()),
-                 'debug_logs': bool(getattr(self, 'btn_debug_logs', False) and getattr(self, 'btn_debug_logs').isChecked())}
+                 'debug_logs': bool(getattr(self, 'btn_debug_logs', False) and getattr(self, 'btn_debug_logs').isChecked()),
+                 'playlist_visible': bool(getattr(self, 'playlist_widget', None) and self.playlist_widget.isVisible())}
             with open(self._settings_path, 'w', encoding='utf-8') as f:
                 json.dump(s, f, ensure_ascii=False, indent=2)
         except Exception:
@@ -372,6 +382,12 @@ class VideoPlayer(QWidget):
                         self.btn_loop.setChecked(self.loop)
                     if hasattr(self, 'btn_shuffle'):
                         self.btn_shuffle.setChecked(self.shuffle)
+                    # restaurar visibilidad de playlist si viene en settings
+                    if 'playlist_visible' in s and hasattr(self, 'set_playlist_visible'):
+                        try:
+                            self.set_playlist_visible(bool(s.get('playlist_visible', True)))
+                        except Exception:
+                            pass
                 except Exception:
                     pass
             else:
@@ -919,3 +935,30 @@ class VideoPlayer(QWidget):
         except Exception:
             return None
 
+    def set_playlist_visible(self, visible: bool):
+        """Mostrar u ocultar el widget de la lista de reproducción y ajustar el layout."""
+        try:
+            if visible:
+                self.playlist_widget.show()
+                # actualizar texto del botón
+                try:
+                    self.toggle_playlist_btn.setText('▾')
+                    self.toggle_playlist_btn.setChecked(True)
+                except Exception:
+                    pass
+            else:
+                self.playlist_widget.hide()
+                try:
+                    self.toggle_playlist_btn.setText('▸')
+                    self.toggle_playlist_btn.setChecked(False)
+                except Exception:
+                    pass
+            # Forzar recalculo del layout
+            try:
+                self.layout().invalidate()
+                self.updateGeometry()
+                self.repaint()
+            except Exception:
+                pass
+        except Exception:
+            pass
