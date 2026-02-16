@@ -1,11 +1,11 @@
-from PySide6.QtCore import Qt, QUrl, QThread, Signal, QObject
+from PySide6.QtCore import Qt, QUrl, QThread, Signal, QObject, QEvent
 from PySide6.QtWidgets import (
     QWidget, QPushButton, QSlider, QLabel,
-    QHBoxLayout, QVBoxLayout, QFileDialog, QStyle, QInputDialog, QMessageBox, QProgressDialog, QCheckBox, QListWidget, QMenu, QAbstractItemView
+    QHBoxLayout, QVBoxLayout, QFileDialog, QStyle, QInputDialog, QMessageBox, QProgressDialog, QCheckBox, QListWidget, QMenu, QAbstractItemView, QSizePolicy
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QShortcut, QKeySequence
 import os
 import logging
 import random
@@ -269,6 +269,21 @@ class VideoPlayer(QWidget):
         self.playlist_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.playlist_widget.customContextMenuRequested.connect(self.show_playlist_context_menu)
 
+        # Instalar event filter en el widget de vídeo para capturar teclas incluso cuando tenga el foco
+        try:
+            self.video_widget.installEventFilter(self)
+        except Exception:
+            pass
+
+        # Shortcuts globales (mientras la ventana esté activa) para fullscreen y escape
+        try:
+            self._sc_toggle_fs = QShortcut(QKeySequence(Qt.Key_F), self)
+            self._sc_toggle_fs.activated.connect(lambda: self.set_fullscreen(not self.fullscreen_btn.isChecked()))
+            self._sc_escape = QShortcut(QKeySequence(Qt.Key_Escape), self)
+            self._sc_escape.activated.connect(lambda: self.set_fullscreen(False) if self.fullscreen_btn.isChecked() else None)
+        except Exception:
+            pass
+
         # Conexiones del player
         self.player.positionChanged.connect(self.position_changed)
         self.player.durationChanged.connect(self.duration_changed)
@@ -419,6 +434,26 @@ class VideoPlayer(QWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):
+        # Capturar teclas en el video_widget para manejar fullscreen/escape
+        try:
+            if obj is self.video_widget and event.type() == QEvent.KeyPress:
+                k = event.key()
+                if k == Qt.Key_F:
+                    # alternar fullscreen
+                    new_state = not self.fullscreen_btn.isChecked()
+                    self.fullscreen_btn.setChecked(new_state)
+                    self.toggle_fullscreen(new_state)
+                    return True
+                if k == Qt.Key_Escape:
+                    if self.fullscreen_btn.isChecked():
+                        self.fullscreen_btn.setChecked(False)
+                        self.toggle_fullscreen(False)
+                        return True
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
 
     def show_playlist_context_menu(self, pos):
         row = self.playlist_widget.row(self.playlist_widget.itemAt(pos))
@@ -583,13 +618,26 @@ class VideoPlayer(QWidget):
         self.play_index(prev_idx)
 
     def toggle_fullscreen(self, checked: bool):
+        # Mantener compatibilidad: recibir checked desde el botón
+        self.set_fullscreen(bool(checked))
+
+    def set_fullscreen(self, enable: bool):
+        """Activar/desactivar fullscreen en el widget de vídeo y sincronizar el botón."""
         try:
-            self.video_widget.setFullScreen(bool(checked))
-            # Sincronizar estado del botón y la vista
-            if checked:
-                self.fullscreen_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarNormalButton))
-            else:
-                self.fullscreen_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+            self.video_widget.setFullScreen(bool(enable))
+            # sincronizar el botón
+            try:
+                self.fullscreen_btn.setChecked(bool(enable))
+            except Exception:
+                pass
+            # cambiar icono visual
+            try:
+                if enable:
+                    self.fullscreen_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarNormalButton))
+                else:
+                    self.fullscreen_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+            except Exception:
+                pass
         except Exception:
             pass
 
