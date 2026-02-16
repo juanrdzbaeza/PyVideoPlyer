@@ -1,0 +1,4 @@
+PySide6>=6.5.1.1
+moviepy>=1.0.3
+imageio-ffmpeg>=0.4.8
+# pytest==7.3.2  # opcional para tests
