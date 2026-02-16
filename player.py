@@ -169,31 +169,336 @@ class VideoPlayer(QWidget):
         bottom_layout.addWidget(self.position_slider)
         bottom_layout.addWidget(self.time_label)
 
-        main_layout = QVBoxLayout()
-        main_layout.addWidget(self.video_widget)
-        main_layout.addLayout(bottom_layout)
-        main_layout.addLayout(control_layout)
-        main_layout.addWidget(self.chk_help_label)
+        main_layout = QHBoxLayout()
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(self.video_widget)
+        left_layout.addLayout(bottom_layout)
+        left_layout.addLayout(control_layout)
+        left_layout.addWidget(self.chk_help_label)
+
+        main_layout.addLayout(left_layout)
+        main_layout.addWidget(self.playlist_widget)
 
         self.setLayout(main_layout)
+
+        # Habilitar drag & drop para añadir archivos a la cola
+        self.setAcceptDrops(True)
+        self.playlist_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.playlist_widget.customContextMenuRequested.connect(self.show_playlist_context_menu)
 
         # Conexiones del player
         self.player.positionChanged.connect(self.position_changed)
         self.player.durationChanged.connect(self.duration_changed)
         self.player.playbackStateChanged.connect(self.playback_state_changed)
         self.player.errorOccurred.connect(self.handle_error)
+        self.player.mediaStatusChanged.connect(self.on_media_status_changed)
+
+        # Cargar settings guardados (last_dir, loop, shuffle)
+        try:
+            self._settings_path = os.path.join(os.path.expanduser('~'), '.pyvideoplayer.json')
+            self.load_settings()
+        except Exception:
+            self._settings_path = None
+
+    def export_playlist_dialog(self):
+        if not self.playlist:
+            QMessageBox.information(self, 'Exportar cola', 'La cola está vacía.')
+            return
+        path, _ = QFileDialog.getSaveFileName(self, 'Exportar cola', os.path.expanduser('~'), 'JSON files (*.json);;All Files (*)')
+        if not path:
+            return
+        try:
+            import json
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(self.playlist, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, 'Exportar cola', f'Cola exportada a: {path}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'No se pudo exportar la cola: {e}')
+
+    def import_playlist_dialog(self):
+        path, _ = QFileDialog.getOpenFileName(self, 'Importar cola', os.path.expanduser('~'), 'JSON files (*.json);;All Files (*)')
+        if not path:
+            return
+        try:
+            import json
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                # filtrar rutas existentes
+                files = [p for p in data if os.path.isfile(p)]
+                if files:
+                    self.add_to_queue(files)
+                    QMessageBox.information(self, 'Importar cola', f'Se importaron {len(files)} entradas')
+                else:
+                    QMessageBox.information(self, 'Importar cola', 'No se encontraron archivos válidos en el JSON')
+            else:
+                QMessageBox.critical(self, 'Importar cola', 'Formato de archivo no válido')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'No se pudo importar la cola: {e}')
+
+    def save_settings(self):
+        try:
+            if not hasattr(self, '_settings_path') or not self._settings_path:
+                return
+            import json
+            s = {'last_dir': getattr(self, 'last_dir', os.path.expanduser('~')),
+                 'loop': bool(self.loop),
+                 'shuffle': bool(self.shuffle)}
+            with open(self._settings_path, 'w', encoding='utf-8') as f:
+                json.dump(s, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def load_settings(self):
+        try:
+            if not hasattr(self, '_settings_path') or not self._settings_path:
+                self._settings_path = os.path.join(os.path.expanduser('~'), '.pyvideoplayer.json')
+            if os.path.exists(self._settings_path):
+                import json
+                with open(self._settings_path, 'r', encoding='utf-8') as f:
+                    s = json.load(f)
+                self.last_dir = s.get('last_dir', os.path.expanduser('~'))
+                self.loop = bool(s.get('loop', False))
+                self.shuffle = bool(s.get('shuffle', False))
+                self.chk_loop.setChecked(self.loop)
+                self.chk_shuffle.setChecked(self.shuffle)
+            else:
+                self.last_dir = os.path.expanduser('~')
+        except Exception:
+            self.last_dir = os.path.expanduser('~')
+
+    def dragEnterEvent(self, event):
+        mime = event.mimeData()
+        if mime.hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        mime = event.mimeData()
+        files = []
+        if mime.hasUrls():
+            for url in mime.urls():
+                path = url.toLocalFile()
+                if os.path.isfile(path):
+                    files.append(path)
+        if files:
+            self.add_to_queue(files)
+        event.acceptProposedAction()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        # Space: play/pause
+        if key == Qt.Key_Space:
+            self.toggle_play()
+            event.accept()
+            return
+        # Right: next
+        if key == Qt.Key_Right:
+            self.next_track()
+            event.accept()
+            return
+        # Left: prev
+        if key == Qt.Key_Left:
+            self.prev_track()
+            event.accept()
+            return
+        # F: fullscreen toggle
+        if key == Qt.Key_F:
+            self.fullscreen_btn.toggle()
+            self.toggle_fullscreen(self.fullscreen_btn.isChecked())
+            event.accept()
+            return
+        # Delete: remove selected
+        if key == Qt.Key_Delete:
+            self.remove_selected()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def show_playlist_context_menu(self, pos):
+        row = self.playlist_widget.row(self.playlist_widget.itemAt(pos))
+        menu = QMenu(self)
+        play_act = menu.addAction("Reproducir")
+        remove_act = menu.addAction("Eliminar")
+        clear_act = menu.addAction("Limpiar cola")
+        act = menu.exec(self.playlist_widget.mapToGlobal(pos))
+        if act == play_act and row >= 0:
+            self.play_index(row)
+        elif act == remove_act and row >= 0:
+            self.playlist.pop(row)
+            if row == self.current_index:
+                # si se estaba reproduciendo, parar o mover a siguiente
+                if row < len(self.playlist):
+                    self.play_index(row)
+                elif len(self.playlist) > 0:
+                    self.play_index(len(self.playlist)-1)
+                else:
+                    self.player.stop()
+                    self.current_index = -1
+            elif self.current_index > row:
+                self.current_index -= 1
+            self.update_playlist_view()
+        elif act == clear_act:
+            self.clear_playlist()
 
     def open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Abrir vídeo", "", "Video Files (*.mp4 *.mkv *.avi *.mov);;All Files (*)")
         if file_path:
-            url = QUrl.fromLocalFile(file_path)
-            self.player.setSource(url)
-            self.play_btn.setEnabled(True)
-            self.stop_btn.setEnabled(True)
-            self.split_btn.setEnabled(True)
-            self.current_file = file_path
-            # Auto play al abrir
-            self.player.play()
+            # Abrir un único archivo y reemplazar la cola
+            self.playlist = [file_path]
+            self.current_index = 0
+            self.update_playlist_view()
+            self.play_index(0)
+
+    def add_to_queue_dialog(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Añadir archivos a la cola", getattr(self, 'last_dir', os.path.expanduser('~')), "Video Files (*.mp4 *.mkv *.avi *.mov);;All Files (*)")
+        if files:
+            self.last_dir = os.path.dirname(files[0])
+            self.add_to_queue(files)
+
+    def add_folder_dialog(self):
+        folder = QFileDialog.getExistingDirectory(self, "Selecciona carpeta", getattr(self, 'last_dir', os.path.expanduser('~')))
+        if not folder:
+            return
+        # Buscar archivos de vídeo comunes en la carpeta (no recursivo)
+        exts = ('.mp4', '.mkv', '.avi', '.mov')
+        files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(exts)]
+        files.sort()
+        if files:
+            self.last_dir = folder
+            self.add_to_queue(files)
+
+    def remove_selected(self):
+        row = self.playlist_widget.currentRow()
+        if row >= 0 and row < len(self.playlist):
+            was_current = (row == self.current_index)
+            removed = self.playlist.pop(row)
+            # ajustar current_index
+            if was_current:
+                # intentar reproducir siguiente lógico
+                if row < len(self.playlist):
+                    self.play_index(row)
+                elif len(self.playlist) > 0:
+                    self.play_index(len(self.playlist)-1)
+                else:
+                    self.player.stop()
+                    self.current_index = -1
+                    self.current_file = None
+            else:
+                if self.current_index > row:
+                    self.current_index -= 1
+            self.update_playlist_view()
+
+    def clear_playlist(self):
+        self.playlist.clear()
+        self.current_index = -1
+        self.current_file = None
+        self.player.stop()
+        self.update_playlist_view()
+
+    def add_to_queue(self, files, play_immediately=False):
+        # Añadir archivos a la cola y opcionalmente reproducir el primero añadido
+        start_index = len(self.playlist)
+        self.playlist.extend(files)
+        self.update_playlist_view()
+        # Habilitar controles relacionados
+        self.prev_btn.setEnabled(len(self.playlist) > 1)
+        self.next_btn.setEnabled(len(self.playlist) > 1)
+        self.play_btn.setEnabled(True)
+        self.stop_btn.setEnabled(True)
+
+        if play_immediately:
+            self.current_index = start_index
+            self.play_index(self.current_index)
+
+    def update_playlist_view(self):
+        self.playlist_widget.clear()
+        for i, p in enumerate(self.playlist, start=1):
+            name = os.path.basename(p)
+            # intentar obtener duración
+            dur_s = self._probe_duration_safe(p)
+            dur_str = ''
+            if dur_s is not None:
+                s = int(round(dur_s))
+                m, s = divmod(s, 60)
+                dur_str = f" ({m:02d}:{s:02d})"
+            from PySide6.QtWidgets import QListWidgetItem
+            item = QListWidgetItem(f"{i:02d}. {name}{dur_str}")
+            # Almacenar la ruta real en UserRole para reconstrucciones seguras al reordenar
+            item.setData(Qt.UserRole, p)
+            self.playlist_widget.addItem(item)
+        # seleccionar el item actual
+        if 0 <= self.current_index < self.playlist_widget.count():
+            self.playlist_widget.setCurrentRow(self.current_index)
+
+    def play_index(self, index: int):
+        if index < 0 or index >= len(self.playlist):
+            return
+        path = self.playlist[index]
+        self.current_file = path
+        url = QUrl.fromLocalFile(path)
+        self.player.setSource(url)
+        self.player.play()
+        self.current_index = index
+        self.update_playlist_view()
+        self.play_btn.setEnabled(True)
+        self.stop_btn.setEnabled(True)
+        self.prev_btn.setEnabled(len(self.playlist) > 1)
+        self.next_btn.setEnabled(len(self.playlist) > 1)
+
+    def next_track(self):
+        if not self.playlist:
+            return
+        if self.shuffle:
+            next_idx = random.randrange(len(self.playlist))
+            # evitar repetir la misma pista cuando sea posible
+            if len(self.playlist) > 1:
+                while next_idx == self.current_index:
+                    next_idx = random.randrange(len(self.playlist))
+        else:
+            next_idx = self.current_index + 1
+            if next_idx >= len(self.playlist):
+                if self.loop:
+                    next_idx = 0
+                else:
+                    # fin de cola
+                    self.player.stop()
+                    return
+        self.play_index(next_idx)
+
+    def prev_track(self):
+        if not self.playlist:
+            return
+        prev_idx = self.current_index - 1
+        if prev_idx < 0:
+            if self.loop:
+                prev_idx = len(self.playlist) - 1
+            else:
+                prev_idx = 0
+        self.play_index(prev_idx)
+
+    def toggle_fullscreen(self, checked: bool):
+        try:
+            self.video_widget.setFullScreen(bool(checked))
+        except Exception:
+            pass
+
+    def on_media_status_changed(self, status):
+        # Detectar fin de reproducción y saltar a la siguiente pista
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer as _QMP
+            if status == _QMP.MediaStatus.EndOfMedia:
+                # Saltar a siguiente automáticamente
+                self.next_track()
+        except Exception:
+            pass
+
+    def on_playlist_double_click(self, item):
+        row = self.playlist_widget.currentRow()
+        if row >= 0:
+            self.play_index(row)
+
 
     def toggle_play(self):
         state = self.player.playbackState()
@@ -425,3 +730,22 @@ class VideoPlayer(QWidget):
                 del os.environ['PYVID_SPLIT_FORCE_PRECISE']
         except Exception:
             pass
+
+    def on_playlist_reordered(self, parent, start, end, destination, row):
+        # Reconstruir self.playlist leyendo la ruta real desde item.data(Qt.UserRole)
+        new_order = []
+        for i in range(self.playlist_widget.count()):
+            it = self.playlist_widget.item(i)
+            path = it.data(Qt.UserRole)
+            if path:
+                new_order.append(path)
+        # Si la reconstrucción tiene la misma longitud, aceptarla
+        if len(new_order) == self.playlist_widget.count():
+            self.playlist = new_order
+            # actualizar current_index según new order
+            if self.current_file and self.current_file in self.playlist:
+                self.current_index = self.playlist.index(self.current_file)
+            else:
+                self.current_index = -1
+        # Guardar settings tras reordenado
+        self.save_settings()
